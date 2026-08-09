@@ -9,3 +9,16 @@ module "dynamodb" {
     Environment = "dev"
   }
 }
+
+module "iam" {
+  source = "./modules/iam"
+
+  dynamodb_table_arn = module.dynamodb.table_arn
+}
+
+module "lambda" {
+  source = "./modules/lambda"
+
+  role_arn   = module.iam.role_arn
+  table_name = module.dynamodb.table_name
+}
