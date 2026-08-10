@@ -10,7 +10,19 @@ table = dynamodb.Table(os.environ["TABLE_NAME"])
 
 
 def lambda_handler(event, context):
-    body = json.loads(event["body"]) if "body" in event else event
+    try:
+        body = json.loads(event["body"]) if "body" in event else event
+    except (json.JSONDecodeError, TypeError):
+        return {
+            "statusCode": 400,
+            "body": json.dumps({"error": "Invalid JSON in request body"}),
+        }
+
+    if "customer_id" not in body or "total_amount" not in body:
+        return {
+            "statusCode": 400,
+            "body": json.dumps({"error": "Missing required fields: customer_id, total_amount"}),
+        }
 
     order_id = str(uuid.uuid4())
     created_at = datetime.now(timezone.utc).isoformat()

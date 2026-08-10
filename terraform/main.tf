@@ -22,3 +22,9 @@ module "lambda" {
   role_arn   = module.iam.role_arn
   table_name = module.dynamodb.table_name
 }
+module "api_gateway" {
+  source = "./modules/api-gateway"
+
+  lambda_invoke_arn    = module.lambda.invoke_arn
+  lambda_function_name = module.lambda.function_name
+}
