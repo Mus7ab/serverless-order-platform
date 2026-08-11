@@ -10,18 +10,25 @@ module "dynamodb" {
   }
 }
 
+module "eventbridge" {
+  source = "./modules/eventbridge"
+}
+
 module "iam" {
   source = "./modules/iam"
 
   dynamodb_table_arn = module.dynamodb.table_arn
+  event_bus_arn       = module.eventbridge.event_bus_arn
 }
 
 module "lambda" {
   source = "./modules/lambda"
 
-  role_arn   = module.iam.role_arn
-  table_name = module.dynamodb.table_name
+  role_arn       = module.iam.role_arn
+  table_name     = module.dynamodb.table_name
+  event_bus_name = module.eventbridge.event_bus_name
 }
+
 module "api_gateway" {
   source = "./modules/api-gateway"
 

@@ -7,6 +7,8 @@ import boto3
 
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(os.environ["TABLE_NAME"])
+events_client = boto3.client("events")
+EVENT_BUS_NAME = os.environ["EVENT_BUS_NAME"]
 
 
 def lambda_handler(event, context):
@@ -36,6 +38,24 @@ def lambda_handler(event, context):
     }
 
     table.put_item(Item=item)
+
+    events_client.put_events(
+        Entries=[
+            {
+                "Source": "order-handler",
+                "DetailType": "OrderPlaced",
+                "EventBusName": EVENT_BUS_NAME,
+                "Detail": json.dumps(
+                    {
+                        "order_id": order_id,
+                        "customer_id": body["customer_id"],
+                        "total_amount": str(body["total_amount"]),
+                        "created_at": created_at,
+                    }
+                ),
+            }
+        ]
+    )
 
     return {
         "statusCode": 201,

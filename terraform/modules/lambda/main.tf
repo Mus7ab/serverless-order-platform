@@ -15,7 +15,8 @@ resource "aws_lambda_function" "order_handler" {
 
   environment {
     variables = {
-      TABLE_NAME = var.table_name
+      TABLE_NAME     = var.table_name
+      EVENT_BUS_NAME = var.event_bus_name
     }
   }
 }

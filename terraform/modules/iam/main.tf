@@ -35,3 +35,16 @@ resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
   role       = aws_iam_role.order_handler.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
+data "aws_iam_policy_document" "eventbridge_access" {
+  statement {
+    effect    = "Allow"
+    actions   = ["events:PutEvents"]
+    resources = [var.event_bus_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "eventbridge_access" {
+  name   = "order-handler-eventbridge-access"
+  role   = aws_iam_role.order_handler.id
+  policy = data.aws_iam_policy_document.eventbridge_access.json
+}
