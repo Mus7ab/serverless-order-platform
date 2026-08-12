@@ -10,8 +10,14 @@ module "dynamodb" {
   }
 }
 
+module "sns_sqs" {
+  source = "./modules/sns-sqs"
+}
+
 module "eventbridge" {
   source = "./modules/eventbridge"
+
+  sns_topic_arn = module.sns_sqs.topic_arn
 }
 
 module "iam" {

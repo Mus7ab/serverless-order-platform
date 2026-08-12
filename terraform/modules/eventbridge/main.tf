@@ -37,3 +37,9 @@ resource "aws_cloudwatch_log_resource_policy" "eventbridge_to_logs" {
     }]
   })
 }
+
+resource "aws_cloudwatch_event_target" "sns_topic" {
+  rule           = aws_cloudwatch_event_rule.order_placed.name
+  event_bus_name = aws_cloudwatch_event_bus.orders.name
+  arn            = var.sns_topic_arn
+}
