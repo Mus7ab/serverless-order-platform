@@ -19,20 +19,20 @@ Most portfolio projects demonstrate always-on compute (EC2, ECS, EKS). This proj
 
 ## 3. Architecture
 
-Synchronous path: API Gateway (HTTP API) leads to order-handler Lambda leads to DynamoDB (orders table, on-demand billing, GSI on customer_id/created_at)
+**Synchronous path:** `API Gateway (HTTP API)` leads to `order-handler` Lambda leads to `DynamoDB` (orders table, on-demand billing, GSI on customer_id/created_at)
 
-Asynchronous fan-out path: order-handler also publishes an OrderPlaced event to a custom EventBridge bus, a rule routes it to an SNS topic, the topic fans out independently to three SQS queues (email, warehouse, inventory), each with its own dead-letter queue, each queue triggers its own consumer Lambda via an event source mapping.
+**Asynchronous fan-out path:** `order-handler` also publishes an `OrderPlaced` event to a custom `EventBridge` bus, a rule routes it to an SNS topic, the topic fans out independently to three SQS queues (email, warehouse, inventory), each with its own dead-letter queue, each queue triggers its own consumer Lambda via an event source mapping.
 
-Tracing: AWS X-Ray active tracing is enabled on all four Lambdas, automatically capturing sub-segments for every downstream AWS SDK call (DynamoDB writes, EventBridge publishes) with zero code instrumentation required.
+**Tracing:** AWS `X-Ray` active tracing is enabled on all four Lambdas, automatically capturing sub-segments for every downstream AWS SDK call (DynamoDB writes, EventBridge publishes) with zero code instrumentation required.
 
 All infrastructure is defined in modular Terraform (dynamodb, iam, lambda, api-gateway, eventbridge, sns-sqs modules), using S3 remote state with native locking, and reuses conventions established in Projects 1-4 of this portfolio.
 
 ## 4. Trade-offs
 
-- HTTP API over REST API (API Gateway): about 3x cheaper per request and simpler to configure, at the cost of more limited native X-Ray integration and no built-in request validation; validation was implemented entirely in the Lambda instead.
-- SNS fan-out over direct EventBridge-to-SQS targeting: adds one extra hop, but is what enables true fan-out isolation; each consumer queue is independent, so a failure in one never blocks or slows the others.
-- str() over Decimal for monetary values: simpler for a portfolio scope, but not production-correct; see Possible Improvements.
-- Kept the Terraform-deprecated hash_key/range_key syntax over the newer key_schema syntax for aws_dynamodb_table, after discovering the replacement has active, documented bugs (including destructive GSI recreation) in the AWS provider. Verified via the provider's GitHub issue tracker rather than assumed.
+- **HTTP API over REST API** (API Gateway): about 3x cheaper per request and simpler to configure, at the cost of more limited native X-Ray integration and no built-in request validation; validation was implemented entirely in the Lambda instead.
+- **SNS fan-out over direct EventBridge-to-SQS targeting**: adds one extra hop, but is what enables true fan-out isolation; each consumer queue is independent, so a failure in one never blocks or slows the others.
+- **`str()` over `Decimal`** for monetary values: simpler for a portfolio scope, but not production-correct; see Possible Improvements.
+- **Kept the Terraform-deprecated `hash_key`/`range_key` syntax** over the newer `key_schema` syntax for aws_dynamodb_table, after discovering the replacement has active, documented bugs (including destructive GSI recreation) in the AWS provider. Verified via the provider's GitHub issue tracker rather than assumed.
 
 ## 5. Cost considerations
 
@@ -40,17 +40,17 @@ Every AWS service used here is either free at idle (Lambda, API Gateway, SNS, SQ
 
 ## 6. Security decisions
 
-- Every IAM role is scoped to the specific resource ARN it needs (e.g. order-handler can PutItem/GetItem only on the orders table, not dynamodb:* on "*"); containing blast radius from bugs or compromise to a single resource, not the whole account.
-- Every cross-service trust relationship (API Gateway to Lambda, EventBridge to SNS, SNS to SQS) uses an explicit resource-based policy with a SourceArn/ArnEquals condition, preventing the confused deputy problem where any caller of that AWS service, not just this specific resource, could invoke or publish.
-- AWSXRayDaemonWriteAccess is the one broad managed policy used; justified because its capability (writing trace telemetry) has no meaningful blast radius even applied broadly, unlike data-access permissions.
-- Terraform state is stored in a versioned, encrypted S3 bucket with native locking, preventing concurrent-write corruption and enabling rollback if state is ever corrupted.
+- **Every IAM role is scoped** to the specific resource ARN it needs (e.g. order-handler can PutItem/GetItem only on the orders table, not dynamodb:* on "*"); containing blast radius from bugs or compromise to a single resource, not the whole account.
+- **Every cross-service trust relationship** (API Gateway to Lambda, EventBridge to SNS, SNS to SQS) uses an explicit resource-based policy with a SourceArn/ArnEquals condition, preventing the confused deputy problem where any caller of that AWS service, not just this specific resource, could invoke or publish.
+- **`AWSXRayDaemonWriteAccess`** is the one broad managed policy used; justified because its capability (writing trace telemetry) has no meaningful blast radius even applied broadly, unlike data-access permissions.
+- **Terraform state** is stored in a versioned, encrypted S3 bucket with native locking, preventing concurrent-write corruption and enabling rollback if state is ever corrupted.
 
 ## 7. Failure scenarios
 
-- SQS retry and DLQ: each queue has maxReceiveCount = 3; after 3 failed processing attempts a message moves automatically to its dedicated dead-letter queue rather than retrying forever or being silently dropped.
-- Consumer isolation: verified live; because each consumer has its own SQS queue subscribed independently to the SNS topic, a failure in warehouse-notifier cannot affect email-notifier or inventory-notifier.
-- Real incident (Day 7): mid-apply, a network interruption caused an S3 state upload failure and left 3 SQS queues marked tainted by Terraform (created successfully, but their post-create verification call had timed out). Rather than assume corruption, the incident was diagnosed methodically: verified connectivity, cross-checked terraform state list against real AWS resources, inspected the actual plan diff before touching apply again. Terraform's taint mechanism safely destroyed and recreated the 3 affected (empty, message-free) queues with zero data loss. Full recovery confirmed via a clean terraform plan showing no drift.
-- Known limitation, dual-write problem: the DynamoDB write and EventBridge publish are two separate, non-atomic calls. If the DynamoDB write succeeds but the EventBridge publish fails, the order exists but no downstream consumer is ever notified. The ordering (DB write first) was chosen deliberately so DynamoDB remains the source of truth, but this does not fully solve the problem; see Possible Improvements.
+- **SQS retry and DLQ**: each queue has maxReceiveCount = 3; after 3 failed processing attempts a message moves automatically to its dedicated dead-letter queue rather than retrying forever or being silently dropped.
+- **Consumer isolation**: verified live; because each consumer has its own SQS queue subscribed independently to the SNS topic, a failure in warehouse-notifier cannot affect email-notifier or inventory-notifier.
+- **Real incident (Day 7)**: mid-apply, a network interruption caused an S3 state upload failure and left 3 SQS queues marked tainted by Terraform (created successfully, but their post-create verification call had timed out). Rather than assume corruption, the incident was diagnosed methodically: verified connectivity, cross-checked terraform state list against real AWS resources, inspected the actual plan diff before touching apply again. Terraform's taint mechanism safely destroyed and recreated the 3 affected (empty, message-free) queues with zero data loss. Full recovery confirmed via a clean terraform plan showing no drift.
+- **Known limitation — dual-write problem**: the DynamoDB write and EventBridge publish are two separate, non-atomic calls. If the DynamoDB write succeeds but the EventBridge publish fails, the order exists but no downstream consumer is ever notified. The ordering (DB write first) was chosen deliberately so DynamoDB remains the source of truth, but this does not fully solve the problem; see Possible Improvements.
 
 ## 8. Lessons learned
 
@@ -61,10 +61,10 @@ Every AWS service used here is either free at idle (Lambda, API Gateway, SNS, SQ
 
 ## 9. Possible improvements
 
-- Idempotent consumers: use order_id as an idempotency key (e.g. a DynamoDB conditional write per consumer) to guard against SQS's at-least-once delivery causing duplicate side effects (duplicate emails, duplicate inventory decrements).
-- Partial batch failure reporting: currently, one bad message in an SQS batch fails the entire batch, redelivering already-successful messages too. AWS Lambda supports reporting which specific message IDs failed; a real fix, not implemented here to keep consumer code simple.
-- Transactional outbox pattern: to properly solve the DynamoDB/EventBridge dual-write problem, write the event to an outbox table (via DynamoDB Streams) instead of publishing directly from the Lambda; guarantees the event is eventually published if and only if the DB write succeeded.
-- Decimal instead of str() for monetary values, enabling numeric queries and aggregations directly in DynamoDB.
+- **Idempotent consumers**: use order_id as an idempotency key (e.g. a DynamoDB conditional write per consumer) to guard against SQS's at-least-once delivery causing duplicate side effects (duplicate emails, duplicate inventory decrements).
+- **Partial batch failure reporting**: currently, one bad message in an SQS batch fails the entire batch, redelivering already-successful messages too. AWS Lambda supports reporting which specific message IDs failed; a real fix, not implemented here to keep consumer code simple.
+- **Transactional outbox pattern**: to properly solve the DynamoDB/EventBridge dual-write problem, write the event to an outbox table (via DynamoDB Streams) instead of publishing directly from the Lambda; guarantees the event is eventually published if and only if the DB write succeeded.
+- **`Decimal` instead of `str()`** for monetary values, enabling numeric queries and aggregations directly in DynamoDB.
 - Confirm and, if needed, recreate a remote-state bucket for Project 3 (EKS); none was found during a cross-portfolio S3 bucket audit while building this project's own state backend.
 
 ## Evidence
