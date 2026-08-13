@@ -8,9 +8,8 @@ def lambda_handler(event, context):
         detail = message["detail"]
 
         print(
-            f"[email-notifier] Sending confirmation email for order "
-            f"{detail['order_id']} to customer {detail['customer_id']} "
-            f"(total: {detail['total_amount']})"
+            f"[inventory-updater] Updating inventory for order "
+            f"{detail['order_id']} (total: {detail['total_amount']})"
         )
 
     return {"statusCode": 200}

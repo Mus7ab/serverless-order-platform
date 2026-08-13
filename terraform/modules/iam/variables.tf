@@ -6,3 +6,8 @@ variable "event_bus_arn" {
   description = "ARN of the EventBridge custom bus the Lambda can publish to"
   type        = string
 }
+
+variable "queue_arns" {
+  description = "Map of consumer name to its SQS queue ARN"
+  type        = map(string)
+}

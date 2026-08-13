@@ -25,14 +25,17 @@ module "iam" {
 
   dynamodb_table_arn = module.dynamodb.table_arn
   event_bus_arn       = module.eventbridge.event_bus_arn
+  queue_arns          = module.sns_sqs.queue_arns
 }
 
 module "lambda" {
   source = "./modules/lambda"
 
-  role_arn       = module.iam.role_arn
-  table_name     = module.dynamodb.table_name
-  event_bus_name = module.eventbridge.event_bus_name
+  role_arn            = module.iam.role_arn
+  table_name          = module.dynamodb.table_name
+  event_bus_name      = module.eventbridge.event_bus_name
+  consumer_role_arns  = module.iam.consumer_role_arns
+  queue_arns          = module.sns_sqs.queue_arns
 }
 
 module "api_gateway" {
