@@ -69,13 +69,21 @@ Every AWS service used here is either free at idle (Lambda, API Gateway, SNS, SQ
 
 ## Evidence
 
-| Screenshot | Shows |
-|---|---|
-| docs/screenshots/01-eventbridge-rule.png | EventBridge rule matching OrderPlaced events |
-| docs/screenshots/02-sns-fanout.png | SNS topic with all 3 SQS subscriptions |
-| docs/screenshots/03-consumer-logs.png | A consumer Lambda processing a real order end-to-end |
-| docs/screenshots/04-xray-trace.png | A live X-Ray distributed trace |
-| docs/screenshots/05-architecture-diagram.png | Full system architecture |
+**EventBridge rule matching OrderPlaced events**
+
+![EventBridge rule](docs/screenshots/01-eventbridge-rule.png)
+
+**SNS topic with all 3 SQS subscriptions**
+
+![SNS fan-out](docs/screenshots/02-sns-fanout.png)
+
+**A consumer Lambda processing a real order end-to-end**
+
+![Consumer logs](docs/screenshots/03-consumer-logs.png)
+
+**A live X-Ray distributed trace**
+
+![X-Ray trace](docs/screenshots/04-xray-trace.png)
 
 ## Repository structure
 
