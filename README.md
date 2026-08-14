@@ -13,7 +13,7 @@ Most portfolio projects demonstrate always-on compute (EC2, ECS, EKS). This proj
 - Accept order requests over a public HTTP endpoint
 - Persist orders durably with the ability to query by both order ID and customer ID
 - Notify three independent downstream systems (email, warehouse, inventory) per order, with failure isolation between them
-- Guarantee no order event is silently lost, even under repeated consumer failure
+- Guarantee no order event is lost once it reaches EventBridge, even under repeated consumer failure
 - Provide distributed tracing across the full request path
 - Stay within AWS free-tier costs for portfolio-scale testing (create, test, destroy per session)
 
@@ -23,7 +23,7 @@ Most portfolio projects demonstrate always-on compute (EC2, ECS, EKS). This proj
 
 **Asynchronous fan-out path:** `order-handler` also publishes an `OrderPlaced` event to a custom `EventBridge` bus, a rule routes it to an SNS topic, the topic fans out independently to three SQS queues (email, warehouse, inventory), each with its own dead-letter queue, each queue triggers its own consumer Lambda via an event source mapping.
 
-**Tracing:** AWS `X-Ray` active tracing is enabled on all four Lambdas, automatically capturing sub-segments for every downstream AWS SDK call (DynamoDB writes, EventBridge publishes) with zero code instrumentation required.
+**Tracing:** AWS `X-Ray` active tracing is enabled on all four Lambdas. Within a single Lambda invocation, X-Ray automatically captures sub-segments for downstream AWS SDK calls (DynamoDB writes, EventBridge publishes) with zero code instrumentation required. Async invocations (EventBridge/SNS/SQS-triggered consumer Lambdas) do not share one continuous trace with the originating request — X-Ray links them as related traces rather than propagating a single trace ID across the async boundary.
 
 All infrastructure is defined in modular Terraform (dynamodb, iam, lambda, api-gateway, eventbridge, sns-sqs modules), using S3 remote state with native locking, and reuses conventions established in Projects 1-4 of this portfolio.
 
@@ -36,7 +36,7 @@ All infrastructure is defined in modular Terraform (dynamodb, iam, lambda, api-g
 
 ## 5. Cost considerations
 
-Every AWS service used here is either free at idle (Lambda, API Gateway, SNS, SQS, EventBridge, all pay-per-use with generous free tiers) or free-tier covered at portfolio test volume (DynamoDB on-demand). Real infrastructure was created, tested, and destroyed within each session, never left running between sessions. Verified actual cost across all 8 build days: effectively $0.
+Every service used stays within AWS's free tier at portfolio testing volumes (a handful of requests per session), and nothing was left running between sessions. Actual cost was not independently verified against AWS Cost Explorer or the Billing Console — based on free-tier pricing and the short-lived nature of each session's resources, the realistic cost is effectively $0, but this is an estimate, not a confirmed billing figure.
 
 ## 6. Security decisions
 
@@ -50,6 +50,7 @@ Every AWS service used here is either free at idle (Lambda, API Gateway, SNS, SQ
 - **SQS retry and DLQ**: each queue has maxReceiveCount = 3; after 3 failed processing attempts a message moves automatically to its dedicated dead-letter queue rather than retrying forever or being silently dropped.
 - **Consumer isolation**: verified live; because each consumer has its own SQS queue subscribed independently to the SNS topic, a failure in warehouse-notifier cannot affect email-notifier or inventory-notifier.
 - **Real incident (Day 7)**: mid-apply, a network interruption caused an S3 state upload failure and left 3 SQS queues marked tainted by Terraform (created successfully, but their post-create verification call had timed out). Rather than assume corruption, the incident was diagnosed methodically: verified connectivity, cross-checked terraform state list against real AWS resources, inspected the actual plan diff before touching apply again. Terraform's taint mechanism safely destroyed and recreated the 3 affected (empty, message-free) queues with zero data loss. Full recovery confirmed via a clean terraform plan showing no drift.
+- **No ordering guarantee**: SNS and standard SQS queues do not guarantee message order. Two orders from the same customer placed in quick succession are not guaranteed to be processed by consumers in the order they were placed. Not addressed in this implementation; SQS FIFO queues would be the fix if ordering became a requirement.
 - **Known limitation — dual-write problem**: the DynamoDB write and EventBridge publish are two separate, non-atomic calls. If the DynamoDB write succeeds but the EventBridge publish fails, the order exists but no downstream consumer is ever notified. The ordering (DB write first) was chosen deliberately so DynamoDB remains the source of truth, but this does not fully solve the problem; see Possible Improvements.
 
 ## 8. Lessons learned
@@ -66,6 +67,36 @@ Every AWS service used here is either free at idle (Lambda, API Gateway, SNS, SQ
 - **Transactional outbox pattern**: to properly solve the DynamoDB/EventBridge dual-write problem, write the event to an outbox table (via DynamoDB Streams) instead of publishing directly from the Lambda; guarantees the event is eventually published if and only if the DB write succeeded.
 - **`Decimal` instead of `str()`** for monetary values, enabling numeric queries and aggregations directly in DynamoDB.
 - Confirm and, if needed, recreate a remote-state bucket for Project 3 (EKS); none was found during a cross-portfolio S3 bucket audit while building this project's own state backend.
+
+## Verified end-to-end
+
+Real CLI output from a live test, not simulated:
+
+**One order placed via the public API:**
+
+```
+$ curl -X POST https://.../orders -d '{"customer_id": "customer-fanout-test", "total_amount": 199.99}'
+HTTP/2 201
+{"order_id": "e9410a94-259b-433a-b387-413b7ded31cd", "status": "PLACED"}
+```
+
+**The same underlying SNS message (MessageId 3e3f5403-8f54-5ea3-8693-36f5eb61c0ed) landed independently in all 3 queues:**
+
+```
+email-queue     -> MessageId 3e3f5403... delivered
+warehouse-queue -> MessageId 3e3f5403... delivered
+inventory-queue -> MessageId 3e3f5403... delivered
+```
+
+**All 3 consumer Lambdas processed the same order independently, confirmed via CloudWatch Logs:**
+
+```
+email-notifier:      order 013ac0d3-d762-4eeb-9007-f4e53f387337 -> confirmation email
+warehouse-notifier:  order 013ac0d3-d762-4eeb-9007-f4e53f387337 -> shipment prep
+inventory-notifier:  order 013ac0d3-d762-4eeb-9007-f4e53f387337 -> inventory update
+```
+
+This is the actual proof behind the fan-out isolation claim in this README: one publish, three independent deliveries, three independent consumers, verified via real IDs matching across every hop, not inferred from infrastructure existing.
 
 ## Evidence
 
